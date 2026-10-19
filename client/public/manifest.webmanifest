@@ -1,0 +1,25 @@
+{
+  "name": "星网 StarNet",
+  "short_name": "星网",
+  "description": "跨网设备星系互联：文字、照片、文件点对点直达，服务器只转发不保存",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070912",
+  "theme_color": "#070912",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

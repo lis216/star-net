@@ -1,0 +1,17 @@
+services:
+  starnet:
+    image: star-net:latest
+    container_name: star-net
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platform: linux/amd64
+    ports:
+      - "3000:3000"   # 宿主端口:容器端口，改宿主端口只需改左边
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
