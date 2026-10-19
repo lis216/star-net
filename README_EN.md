@@ -120,10 +120,13 @@ cd server && node smoke.mjs
 ### Docker (recommended)
 
 ```bash
-# Option A: build from source
+# Option A: pull the image directly (recommended)
+docker pull ghcr.io/lis216/star-net:latest
+
+# Option B: build from source
 docker compose up -d --build
 
-# Option B: load a pre-exported image tarball
+# Option C: load a pre-exported image tarball
 docker load -i star-net-latest.tar
 docker compose up -d
 ```

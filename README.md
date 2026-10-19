@@ -118,10 +118,13 @@ cd server && node smoke.mjs
 ### Docker（推荐）
 
 ```bash
-# 方式一：源码构建
+# 方式一：直接拉取镜像（推荐）
+docker pull ghcr.io/lis216/star-net:latest
+
+# 方式二：源码构建
 docker compose up -d --build
 
-# 方式二：导入已导出的镜像包
+# 方式三：导入已导出的镜像包
 docker load -i star-net-latest.tar
 docker compose up -d
 ```
