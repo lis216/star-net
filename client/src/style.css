@@ -847,7 +847,8 @@ button.ghost {
   border-top: 1px solid rgba(140, 160, 255, 0.12);
 }
 
-.composer input {
+.composer input,
+.composer textarea {
   flex: 1;
   min-width: 0;
   padding: 9px 12px;
@@ -857,6 +858,14 @@ button.ghost {
   color: #e8ecf8;
   outline: none;
   font-size: 13px;
+}
+
+.composer textarea {
+  resize: none;
+  font-family: inherit;
+  line-height: 1.45;
+  max-height: 150px;
+  overflow-y: auto;
 }
 
 .attach {
@@ -899,6 +908,8 @@ button.ghost {
   border: 1px solid rgba(140, 160, 255, 0.18);
   font-size: 13px;
   line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
   word-break: break-word;
   white-space: pre-wrap;
 }

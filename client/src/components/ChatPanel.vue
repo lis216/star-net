@@ -10,6 +10,7 @@ const chat = useChatStore();
 
 const collapsed = ref(false);
 const draft = ref('');
+const inputEl = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const listEl = ref<HTMLElement | null>(null);
 const dragging = ref(false);
@@ -65,6 +66,22 @@ function send(): void {
   if (chat.activeTab === 'bcast') chat.sendBcastText(t);
   else chat.sendP2pText(chat.activeTab, t);
   draft.value = '';
+  nextTick(autoGrow);
+}
+
+/** 回车发送；Shift+回车换行；中文输入法选词回车不触发发送 */
+function onEnterKey(e: KeyboardEvent): void {
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  send();
+}
+
+/** 输入框高度自适应内容，最多约 6 行 */
+function autoGrow(): void {
+  const el = inputEl.value;
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
 }
 
 function pickFile(): void {
@@ -188,12 +205,15 @@ onUnmounted(() => listEl.value?.removeEventListener('load', scrollBottom, true))
           断开
         </button>
         <button class="attach" :disabled="isEnded" data-tip="发送文件 / 照片（可多选）" @click="pickFile">📎</button>
-        <input
+        <textarea
+          ref="inputEl"
           v-model="draft"
+          rows="1"
           :placeholder="chat.activeTab === 'bcast' ? '发送到星系频道…' : isEnded ? '对方已离开…' : `发送给 ${activePeer?.peerName || ''}…`"
-          @keyup.enter="send"
+          @keydown.enter.exact="onEnterKey"
           @paste="onPaste"
-        />
+          @input="autoGrow"
+        ></textarea>
         <button class="send" :disabled="!draft.trim() || isEnded" @click="send">发送</button>
         <input ref="fileInput" type="file" multiple hidden @change="onFiles" />
       </div>
