@@ -76,12 +76,12 @@ function onEnterKey(e: KeyboardEvent): void {
   send();
 }
 
-/** 输入框高度自适应内容，最多约 6 行 */
+/** 输入框高度自适应，单行封顶（超出部分框内滚动） */
 function autoGrow(): void {
   const el = inputEl.value;
   if (!el) return;
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+  el.style.height = Math.min(el.scrollHeight, 39) + 'px';
 }
 
 function pickFile(): void {
