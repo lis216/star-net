@@ -5,6 +5,8 @@ class SocketClient {
   private handlers = new Map<string, Handler[]>();
   private retry = 0;
   private closedByUser = false;
+  /** 保活定时器：服务端 45s 没收到消息就断开连接，空闲时必须定期发 ping */
+  private keepAlive: ReturnType<typeof setInterval> | null = null;
 
   onOpen: (() => void) | null = null;
   onClose: (() => void) | null = null;
@@ -25,6 +27,7 @@ class SocketClient {
 
     ws.onopen = () => {
       this.retry = 0;
+      this.startKeepAlive();
       this.onOpen?.();
     };
 
@@ -45,6 +48,7 @@ class SocketClient {
 
     ws.onclose = () => {
       this.ws = null;
+      this.stopKeepAlive();
       this.onClose?.();
       if (!this.closedByUser) {
         this.retry += 1;
@@ -62,7 +66,23 @@ class SocketClient {
     };
   }
 
+  /** 每 15s 发一次应用层 ping（远小于服务端 45s 超时），空闲连接不再被误杀 */
+  private startKeepAlive(): void {
+    this.stopKeepAlive();
+    this.keepAlive = setInterval(() => {
+      this.send({ type: 'ping' });
+    }, 15_000);
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAlive) {
+      clearInterval(this.keepAlive);
+      this.keepAlive = null;
+    }
+  }
+
   private cleanup(): void {
+    this.stopKeepAlive();
     if (this.ws) {
       this.closedByUser = true;
       try {
