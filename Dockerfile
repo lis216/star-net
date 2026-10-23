@@ -2,7 +2,9 @@
 # 构建上下文 = starnet/ 根目录（内含 server/ 与 client/）
 
 # ---------- 阶段 1：构建前端 ----------
-FROM node:22-alpine AS client-build
+# 基础镜像固定到修复版：CVE-2026-111497（Brotli 解码器越界写入，可 RCE）
+# 后续安全升级需手动更新此处版本号
+FROM node:22.23.4-alpine AS client-build
 WORKDIR /build/client
 COPY client/package*.json ./
 RUN npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
@@ -10,7 +12,7 @@ COPY client/ ./
 RUN npm run build
 
 # ---------- 阶段 2：运行镜像 ----------
-FROM node:22-alpine
+FROM node:22.23.4-alpine
 WORKDIR /app/server
 ENV NODE_ENV=production
 
