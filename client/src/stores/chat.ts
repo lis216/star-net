@@ -19,6 +19,8 @@ interface IncomingFile {
   msg: ChatMsg;
   done: boolean;
   meter: (bytes: number) => { speed: number; eta: number };
+  /** 最近一次收到分片的时间，用于停滞检测 */
+  lastAt: number;
 }
 
 function b64ToBytes(b64: string): Uint8Array {
@@ -63,6 +65,27 @@ export const useChatStore = defineStore('chat', () => {
   const acceptWaiters = new Map<string, (v: 'accept' | 'reject' | 'cancel') => void>();
   /** 发送取消标记 */
   const abortFlags = new Map<string, true>();
+
+  // 接收端停滞检测：发送端断线/手机息屏冻结时不会发 cancel，分片流会悄悄断掉，
+  // 45 秒无新分片即判定传输中断（正常传输哪怕背压也不会停顿这么久）
+  setInterval(() => {
+    const now = Date.now();
+    for (const [fileId, inc] of [...incoming.entries()]) {
+      if (inc.done) {
+        incoming.delete(fileId);
+        continue;
+      }
+      if (now - inc.lastAt > 45_000) {
+        inc.done = true;
+        incoming.delete(fileId);
+        inc.msg.transfer = 'failed';
+        inc.msg.speed = undefined;
+        inc.msg.eta = undefined;
+        void fileStore.discard(fileId);
+        room.toast(`「${inc.msg.fileName || '文件'}」传输中断，接收已取消`);
+      }
+    }
+  }, 10_000);
 
   /** 自动接收文件开关（P2P 私聊；广播频道始终直接接收） */
   const autoAccept = ref(localStorage.getItem('starnet.autoaccept') === '1');
@@ -245,16 +268,23 @@ export const useChatStore = defineStore('chat', () => {
       if (useHash) digests[i] = await crypto.subtle.digest('SHA-256', buf);
       const bytes = new Uint8Array(buf);
 
+      // 每一片必须确认真正发出：连接断开的瞬间 socket/p2p 会静默丢数据，
+      // 不检查的话发送端假成功、接收端永远等不到收尾（卡片卡在"接收中"没有下载链接）
+      let sent: boolean;
       if (scope === 'bcast') {
-        socket.sendBinary(packChunkFrame(FRAME_BCAST_CHUNK, fileId, i, bytes));
-        await fileStore.waitDrain(); // 接收端落盘背压
+        sent = room.connected && socket.sendBinary(packChunkFrame(FRAME_BCAST_CHUNK, fileId, i, bytes));
+        if (sent) await fileStore.waitDrain(); // 接收端落盘背压
       } else if (p2p.isOpen(peerId)) {
-        p2p.sendBinary(peerId, packChunkFrame(FRAME_P2P_CHUNK, fileId, i, bytes));
-        await p2p.waitDrain(peerId);
+        sent = p2p.sendBinary(peerId, packChunkFrame(FRAME_P2P_CHUNK, fileId, i, bytes));
+        if (sent) await p2p.waitDrain(peerId);
       } else {
         // 中转：JSON + base64（服务器 512KB 单条消息上限内）
-        p2p.send(peerId, { kind: 'p2p-chunk', fileId, index: i, data: bytesToB64(bytes) });
-        await fileStore.waitDrain();
+        sent = p2p.send(peerId, { kind: 'p2p-chunk', fileId, index: i, data: bytesToB64(bytes) });
+        if (sent) await fileStore.waitDrain();
+      }
+      if (!sent) {
+        failSend(msg, scope, peerId, fileId);
+        return;
       }
       msg.progress = (i + 1) / total;
       const { speed, eta } = meter((i + 1) * chunkSize);
@@ -269,11 +299,34 @@ export const useChatStore = defineStore('chat', () => {
       chain = toHex(await crypto.subtle.digest('SHA-256', cat.buffer));
     }
 
-    if (scope === 'bcast') socket.send({ type: 'bcast-file-end', fileId, hash: chain });
-    else p2p.send(peerId, { kind: 'p2p-file-end', fileId, hash: chain });
+    if (scope === 'bcast') {
+      if (!room.connected || !socket.send({ type: 'bcast-file-end', fileId, hash: chain })) {
+        failSend(msg, scope, peerId, fileId);
+        return;
+      }
+    } else {
+      if (!p2p.send(peerId, { kind: 'p2p-file-end', fileId, hash: chain })) {
+        failSend(msg, scope, peerId, fileId);
+        return;
+      }
+    }
     msg.transfer = 'done';
     msg.speed = undefined;
     msg.eta = undefined;
+  }
+
+  /** 发送通道失效：标记失败，并尽力通知接收端清理半成品（避免其永久卡在"接收中"） */
+  function failSend(msg: ChatMsg, scope: 'bcast' | 'p2p', peerId: string, fileId: string): void {
+    msg.transfer = 'failed';
+    msg.speed = undefined;
+    msg.eta = undefined;
+    room.toast(`「${msg.fileName || '文件'}」发送中断（连接已断开），请重新发送`);
+    try {
+      if (scope === 'bcast') socket.send({ type: 'bcast-file-cancel', fileId });
+      else p2p.send(peerId, { kind: 'p2p-file-cancel', fileId });
+    } catch {
+      /* 连接已断，通知不到就只能靠接收端自身的停滞检测兜底 */
+    }
   }
 
   /** 发送方主动取消（等待确认中或传输中） */
@@ -323,7 +376,7 @@ export const useChatStore = defineStore('chat', () => {
       return;
     }
     if (scope === 'p2p') p2p.send(peerId, { kind: 'p2p-file-accept', fileId: meta.fileId });
-    incoming.set(meta.fileId, { total, got: 0, msg, done: false, meter: makeMeter(meta.size) });
+    incoming.set(meta.fileId, { total, got: 0, msg, done: false, meter: makeMeter(meta.size), lastAt: Date.now() });
     void fileStore.create(meta.fileId, meta.size, total, !!meta.chk, chunkSize);
   }
 
@@ -337,7 +390,7 @@ export const useChatStore = defineStore('chat', () => {
     msg.transfer = 'receiving';
     const chunkSize = P2P_CHUNK;
     const total = Math.max(1, Math.ceil((msg.size || 0) / chunkSize));
-    incoming.set(fileId, { total, got: 0, msg, done: false, meter: makeMeter(msg.size || 0) });
+    incoming.set(fileId, { total, got: 0, msg, done: false, meter: makeMeter(msg.size || 0), lastAt: Date.now() });
     void fileStore.create(fileId, msg.size || 0, total, !!c.meta.chk, chunkSize);
     p2p.send(c.peerId, { kind: 'p2p-file-accept', fileId });
   }
@@ -389,6 +442,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!inc || inc.done) return;
     if (!Number.isInteger(index) || index < 0 || index >= inc.total) return;
     inc.got += 1;
+    inc.lastAt = Date.now();
     inc.msg.progress = Math.min(1, inc.got / inc.total);
     const { speed, eta } = inc.meter(inc.got * (inc.msg.size || 0) / inc.total);
     inc.msg.speed = speed;

@@ -20,6 +20,11 @@ let workerBroken = false;
 const createWaiters = new Map<string, { resolve: () => void; reject: () => void }>();
 const finishWaiters = new Map<string, { resolve: (r: FinishResult | null) => void }>();
 
+// create 未完成期间到达的分片先缓冲，完成后按序落位——
+// 否则 OPFS 降级内存的瞬间，先到的分片已经进了 worker，后到的进了内存，文件会缺片
+const createInFlight = new Map<string, Promise<void>>();
+const pendingWrites = new Map<string, { index: number; bytes: Uint8Array; resolve: () => void }[]>();
+
 // 写入背压
 const ackWaiters = new Map<string, () => void>();
 let inFlight = 0;
@@ -88,6 +93,20 @@ async function materialize(id: string): Promise<File | null> {
 }
 
 export async function create(id: string, size: number, total: number, chk: boolean, chunkSize: number): Promise<void> {
+  const p = doCreate(id, size, total, chk, chunkSize);
+  createInFlight.set(id, p);
+  try {
+    await p;
+  } finally {
+    // 先取出缓冲再清 in-flight 标记，保证不会有分片从缝隙里溜进错误的存储
+    const buffered = pendingWrites.get(id);
+    pendingWrites.delete(id);
+    createInFlight.delete(id);
+    if (buffered) for (const w of buffered) void write(id, w.index, w.bytes).then(w.resolve);
+  }
+}
+
+async function doCreate(id: string, size: number, total: number, chk: boolean, chunkSize: number): Promise<void> {
   const w = ensureWorker();
   if (w) {
     try {
@@ -112,6 +131,15 @@ export async function create(id: string, size: number, total: number, chk: boole
 
 /** 写入一片，返回写入完成（ack）的 Promise */
 export async function write(id: string, index: number, bytes: Uint8Array): Promise<void> {
+  if (createInFlight.has(id)) {
+    // create 尚未落定（worker 建文件中或即将降级），先缓冲
+    await new Promise<void>((resolve) => {
+      const list = pendingWrites.get(id) || [];
+      list.push({ index, bytes, resolve });
+      pendingWrites.set(id, list);
+    });
+    return;
+  }
   if (memSupported.has(id)) {
     const f = memFiles.get(id);
     if (f && !f.chunks[index]) {

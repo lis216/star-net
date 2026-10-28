@@ -66,28 +66,44 @@ async function cleanStale(): Promise<void> {
 }
 void cleanStale();
 
-S.onmessage = async (e: MessageEvent) => {
+/**
+ * 所有 create/write/finish/discard 串行执行：
+ * write 的 SHA-256 是异步的，若不排队，finish 会在最后几片的哈希回填前
+ * 抢先校验，误报"校验失败"（内容其实完好）
+ */
+let queue: Promise<void> = Promise.resolve();
+
+function enqueue(id: string, step: () => Promise<void>): void {
+  queue = queue
+    .then(step)
+    .catch((err: any) => {
+      S.postMessage({ t: 'error', id, reason: String(err?.message || err) });
+    });
+}
+
+S.onmessage = (e: MessageEvent) => {
   const m: any = e.data;
-  try {
-    if (m.t === 'create') {
+  if (m.t === 'create') {
+    enqueue(m.id, async () => {
       const d = await getDir();
       const fh = await d.getFileHandle(m.id, { create: true });
       const handle: FileSystemSyncAccessHandle = await (fh as any).createSyncAccessHandle();
       handle.truncate(0);
       entries.set(m.id, { handle, cs: m.cs, total: m.total, chk: !!m.chk, hashes: new Array(m.total).fill(null) });
       S.postMessage({ t: 'created', id: m.id });
-    } else if (m.t === 'write') {
+    });
+  } else if (m.t === 'write') {
+    enqueue(m.id, async () => {
       const en = entries.get(m.id);
       if (en) {
         const buf: ArrayBuffer = m.buf;
         en.handle.write(buf, { at: m.index * en.cs });
-        if (en.chk) {
-          const h = await digest(buf);
-          en.hashes[m.index] = h;
-        }
+        if (en.chk) en.hashes[m.index] = await digest(buf);
       }
       S.postMessage({ t: 'written', id: m.id, index: m.index });
-    } else if (m.t === 'finish') {
+    });
+  } else if (m.t === 'finish') {
+    enqueue(m.id, async () => {
       const en = entries.get(m.id);
       if (!en) {
         S.postMessage({ t: 'done', id: m.id, ok: false });
@@ -109,7 +125,9 @@ S.onmessage = async (e: MessageEvent) => {
         }
       }
       S.postMessage({ t: 'done', id: m.id, ok: true, verified });
-    } else if (m.t === 'discard') {
+    });
+  } else if (m.t === 'discard') {
+    enqueue(m.id, async () => {
       const en = entries.get(m.id);
       if (en) {
         try { en.handle.close(); } catch { /* noop */ }
@@ -120,8 +138,6 @@ S.onmessage = async (e: MessageEvent) => {
         await d.removeEntry(m.id);
       } catch { /* noop */ }
       S.postMessage({ t: 'written', id: m.id, index: -1 });
-    }
-  } catch (err: any) {
-    S.postMessage({ t: 'error', id: m?.id, reason: String(err?.message || err) });
+    });
   }
 };

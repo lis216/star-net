@@ -19,7 +19,7 @@ export interface ChatMsg {
   self: boolean;
   blobUrl?: string;
   progress?: number; // 0..1
-  transfer?: 'awaiting' | 'sending' | 'confirming' | 'receiving' | 'done' | 'rejected' | 'timeout' | 'canceled';
+  transfer?: 'awaiting' | 'sending' | 'confirming' | 'receiving' | 'done' | 'rejected' | 'timeout' | 'canceled' | 'failed';
   speed?: number; // 传输速度 B/s
   eta?: number; // 预计剩余秒数
 }

@@ -19,6 +19,7 @@ const TRANSFER_NOTE: Record<string, string> = {
   rejected: '对方拒收了该文件',
   timeout: '对方未响应，传输已取消',
   canceled: '文件传输已取消',
+  failed: '传输中断，文件不完整，请让对方重新发送',
 };
 
 const inFlight = computed(() =>

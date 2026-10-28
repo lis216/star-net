@@ -123,14 +123,14 @@ class P2PManager {
     this.conns.delete(peerId);
   }
 
-  /** 发送：DataChannel 可用则直发，否则经服务器中转（对端无感知） */
-  send(peerId: string, payload: unknown): void {
+  /** 发送：DataChannel 可用则直发，否则经服务器中转（对端无感知）。返回是否真正发出 */
+  send(peerId: string, payload: unknown): boolean {
     const conn = this.conns.get(peerId);
     if (conn && conn.dc && conn.dc.readyState === 'open') {
       conn.dc.send(JSON.stringify(payload));
-    } else {
-      socket.send({ type: 'p2p-relay', to: peerId, payload });
+      return true;
     }
+    return socket.send({ type: 'p2p-relay', to: peerId, payload });
   }
 
   /** 直发二进制帧（仅 DataChannel 打开时有效） */
