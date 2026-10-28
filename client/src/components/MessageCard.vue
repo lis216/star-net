@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import type { ChatMsg } from '../types';
 import { openLightbox } from '../ui/lightbox';
 import { copyText } from '../utils/clipboard';
+import { saveBlobFile } from '../utils/saveFile';
 import { useRoomStore } from '../stores/room';
 import { useChatStore } from '../stores/chat';
 
@@ -27,6 +28,13 @@ const inFlight = computed(() =>
 async function copyMsg(): Promise<void> {
   const ok = await copyText(props.msg.text || '');
   room.toast(ok ? '已复制到剪贴板' : '复制失败');
+}
+
+/** 手机端 blob 下载不可靠（iOS 会存成 .txt），统一走分享面板/兜底下载 */
+async function saveMsg(): Promise<void> {
+  if (!props.msg.blobUrl) return;
+  const ok = await saveBlobFile(props.msg.blobUrl, props.msg.fileName || 'file', props.msg.mime);
+  if (!ok) room.toast('保存失败，请重试');
 }
 
 function fmtSize(n?: number): string {
@@ -66,14 +74,14 @@ function fmtTime(ts: number): string {
         <img v-if="isImage" :src="msg.blobUrl" :alt="msg.fileName" class="preview zoomable" @click="openLightbox(msg.blobUrl!, msg.fileName || '')" />
         <video v-else-if="isVideo" :src="msg.blobUrl" controls class="preview" />
         <audio v-else-if="isAudio" :src="msg.blobUrl" controls />
-        <a v-else :href="msg.blobUrl" :download="msg.fileName" class="filebox">
+        <a v-else :href="msg.blobUrl" :download="msg.fileName" class="filebox" @click.prevent="saveMsg">
           <span class="icon">📄</span>
           <span class="fmeta">
             <span class="fname">{{ msg.fileName }}</span>
             <span class="fsize">{{ fmtSize(msg.size) }} · 点击下载</span>
           </span>
         </a>
-        <a v-if="isImage || isVideo" :href="msg.blobUrl" :download="msg.fileName" class="dl">
+        <a v-if="isImage || isVideo" :href="msg.blobUrl" :download="msg.fileName" class="dl" @click.prevent="saveMsg">
           {{ msg.fileName }} · {{ fmtSize(msg.size) }} · 下载
         </a>
       </template>

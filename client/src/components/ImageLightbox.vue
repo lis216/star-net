@@ -1,12 +1,23 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
 import { lightboxUrl, lightboxName, closeLightbox } from '../ui/lightbox';
+import { saveBlobFile } from '../utils/saveFile';
 
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') closeLightbox();
 }
 onMounted(() => window.addEventListener('keydown', onKey));
 onUnmounted(() => window.removeEventListener('keydown', onKey));
+
+async function saveImage(): Promise<void> {
+  if (!lightboxUrl.value) return;
+  const name = lightboxName.value || 'image.png';
+  // 灯箱里的 blob URL 已带 MIME；无类型时兜底按 png 处理
+  const res = await fetch(lightboxUrl.value);
+  const raw = await res.blob();
+  const mime = raw.type || 'image/png';
+  await saveBlobFile(lightboxUrl.value, name, mime);
+}
 </script>
 
 <template>
@@ -16,7 +27,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
         <img :src="lightboxUrl" :alt="lightboxName" @click.stop="closeLightbox()" />
         <div class="lb-meta" @click.stop>
           <span class="lb-name">{{ lightboxName }}</span>
-          <a :href="lightboxUrl" :download="lightboxName || 'image'" class="lb-dl">下载原图</a>
+          <a href="#" :download="lightboxName || 'image'" class="lb-dl" @click.prevent="saveImage">下载原图</a>
           <button class="lb-close" @click="closeLightbox()">关闭 (Esc)</button>
         </div>
       </div>

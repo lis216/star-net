@@ -427,7 +427,10 @@ export const useChatStore = defineStore('chat', () => {
     msg.speed = undefined;
     msg.eta = undefined;
     if (res) {
-      msg.blobUrl = URL.createObjectURL(res.blob);
+      // 必须给 Blob 带上 MIME：内存分片组装的 Blob 和 OPFS 取回的 File 都没有 type，
+      // 无类型 blob URL 在 iOS 上下载会被当 text/plain 存成 .txt、文件名也丢失
+      const typed = res.blob.type ? res.blob : new Blob([res.blob], { type: msg.mime || 'application/octet-stream' });
+      msg.blobUrl = URL.createObjectURL(typed);
       pushNotify(`${msg.from.name}`, `文件「${msg.fileName}」接收完成`);
       if (expect && !res.verified) {
         room.toast(`文件「${msg.fileName}」校验失败，内容可能已损坏`);
